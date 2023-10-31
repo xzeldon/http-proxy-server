@@ -1,0 +1,3 @@
+bin/*
+server.key
+server.pem
