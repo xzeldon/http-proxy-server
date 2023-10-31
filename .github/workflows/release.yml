@@ -41,5 +41,4 @@ jobs:
         goarch: ${{ matrix.goarch }}
         binary_name: http-proxy-server
         ldflags: -s -w
-        executable_compression: upx --ultra-brute
         extra_files: LICENSE
