@@ -12,17 +12,21 @@ import (
 	"time"
 )
 
-var (
-	PORT          string
-	AUTH_USERNAME string
-	AUTH_PASSWORD string
-)
+type ProxyServer struct {
+	port     string
+	username string
+	password string
+}
 
-func checkProxyAuth(r *http.Request, username, password string) bool {
-	// If no username or password provided, always allow
-	if AUTH_USERNAME == "" && AUTH_PASSWORD == "" {
+func (ps *ProxyServer) isAuthRequired() bool {
+	return ps.username != "" && ps.password != ""
+}
+
+func (ps *ProxyServer) checkProxyAuth(r *http.Request) bool {
+	if !ps.isAuthRequired() {
 		return true
 	}
+
 	authHeader := r.Header.Get("Proxy-Authorization")
 	const prefix = "Basic "
 	if !strings.HasPrefix(authHeader, prefix) {
@@ -39,11 +43,11 @@ func checkProxyAuth(r *http.Request, username, password string) bool {
 		return false
 	}
 
-	return pair[0] == AUTH_USERNAME && pair[1] == AUTH_PASSWORD
+	return pair[0] == ps.username && pair[1] == ps.password
 }
 
-func mainHandler(w http.ResponseWriter, r *http.Request) {
-	if !checkProxyAuth(r, AUTH_USERNAME, AUTH_PASSWORD) {
+func (ps *ProxyServer) requestHandler(w http.ResponseWriter, r *http.Request) {
+	if !ps.checkProxyAuth(r) {
 		w.Header().Set("Proxy-Authenticate", `Basic realm="Provide username and password"`)
 		http.Error(w, "Proxy authentication required", http.StatusProxyAuthRequired)
 		return
@@ -56,30 +60,33 @@ func mainHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func logRequest(r *http.Request) {
-	log.Printf("Method: %s, URL: %s", r.Method, r.URL.String())
-}
-
+// Manages tunneling requests (used for HTTPS connections).
 func handleTunneling(w http.ResponseWriter, r *http.Request) {
 	logRequest(r)
 
-	dest_conn, err := net.DialTimeout("tcp", r.Host, 10*time.Second)
+	destConn, err := net.DialTimeout("tcp", r.Host, 10*time.Second)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusServiceUnavailable)
 		return
 	}
+
 	w.WriteHeader(http.StatusOK)
+
+	// Hijack the connection to manage it at the TCP level
 	hijacker, ok := w.(http.Hijacker)
 	if !ok {
 		http.Error(w, "Hijacking not supported", http.StatusInternalServerError)
 		return
 	}
-	client_conn, _, err := hijacker.Hijack()
+	clientConn, _, err := hijacker.Hijack()
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		return
 	}
-	go transfer(dest_conn, client_conn)
-	go transfer(client_conn, dest_conn)
+
+	// Transfer data between client and destination
+	go transfer(destConn, clientConn)
+	go transfer(clientConn, destConn)
 }
 
 func transfer(destination io.WriteCloser, source io.ReadCloser) {
@@ -97,6 +104,7 @@ func handleHTTP(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	defer resp.Body.Close()
+
 	copyHeader(w.Header(), resp.Header)
 	w.WriteHeader(resp.StatusCode)
 	io.Copy(w, resp.Body)
@@ -110,22 +118,29 @@ func copyHeader(dst, src http.Header) {
 	}
 }
 
+func logRequest(r *http.Request) {
+	log.Printf("Method: %s, URL: %s", r.Method, r.URL.String())
+}
+
 func main() {
-	flag.StringVar(&PORT, "port", "3000", "Specify the port the proxy will run on")
-	flag.StringVar(&AUTH_USERNAME, "username", "", "Username for proxy authentication")
-	flag.StringVar(&AUTH_PASSWORD, "password", "", "Password for proxy authentication")
+	var port, username, password string
+
+	flag.StringVar(&port, "port", "3000", "Specify the port the proxy will run on")
+	flag.StringVar(&username, "username", "", "Username for proxy authentication")
+	flag.StringVar(&password, "password", "", "Password for proxy authentication")
 	flag.Parse()
 
-	if (AUTH_USERNAME == "" && AUTH_PASSWORD != "") || (AUTH_USERNAME != "" && AUTH_PASSWORD == "") {
+	if (username == "" && password != "") || (username != "" && password == "") {
 		log.Fatal("Error: Both username and password must be provided, or neither should be.")
 	}
 
+	proxy := &ProxyServer{port: port, username: username, password: password}
 	server := &http.Server{
-		Addr:    ":" + PORT,
-		Handler: http.HandlerFunc(mainHandler),
-		// Disable HTTP/2.
+		Addr:    ":" + proxy.port,
+		Handler: http.HandlerFunc(proxy.requestHandler),
+		// Disable HTTP/2 (https://github.com/golang/go/issues/14797#issuecomment-196103814)
 		TLSNextProto: make(map[string]func(*http.Server, *tls.Conn, http.Handler)),
 	}
-	log.Printf("Starting proxy server on :%s\n", PORT)
+	log.Printf("Starting proxy server on :%s\n", proxy.port)
 	log.Fatal(server.ListenAndServe())
 }
