@@ -2,6 +2,8 @@
 
 This is a lightweight proxy server written in Go that supports HTTP requests and HTTPS tunneling.
 
+Mirror on my [<img src="https://git.zeldon.ru/assets/img/logo.svg" align="center" width="20" height="20"/> Git](https://git.zeldon.ru/zeldon/http-proxy-server)
+
 ## Features
 
 - Proxying HTTP requests
