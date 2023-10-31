@@ -116,6 +116,10 @@ func main() {
 	flag.StringVar(&AUTH_PASSWORD, "password", "", "Password for proxy authentication")
 	flag.Parse()
 
+	if (AUTH_USERNAME == "" && AUTH_PASSWORD != "") || (AUTH_USERNAME != "" && AUTH_PASSWORD == "") {
+		log.Fatal("Error: Both username and password must be provided, or neither should be.")
+	}
+
 	server := &http.Server{
 		Addr:    ":" + PORT,
 		Handler: http.HandlerFunc(mainHandler),
