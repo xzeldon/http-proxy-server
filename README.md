@@ -1,4 +1,4 @@
-# Simple HTTP Tunneling Proxy Server in Go
+# HTTP Proxy Server
 
 This is a lightweight proxy server written in Go that supports HTTP requests and HTTPS tunneling.
 
